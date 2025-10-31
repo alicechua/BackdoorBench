@@ -1,0 +1,21 @@
+# --- Core (needed for BAS generation/labeling) ---
+networkx>=3.2
+pgmpy==0.1.25
+torch==2.2.2
+numpy<2.0
+
+scipy>=1.10
+pandas>=2.0
+tqdm>=4.66
+orjson>=3.9
+matplotlib==3.10.7
+
+
+# --- Optional: validation & visualization ---
+# dowhy>=0.11          # for numeric ATE sanity checks against SCMs
+# graphviz>=0.20.1     # for rendering graphs (requires Graphviz system package)
+# pygraphviz>=1.12     # alternative graph drawing backend (also needs system libs)
+
+# --- Optional: dev/test ---
+# pytest>=7.4
+# ruff>=0.5
