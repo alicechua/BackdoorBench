@@ -59,21 +59,29 @@ def load_jsonl(path: str) -> List[Dict]:
     return data
 
 def to_digraph(example: Dict) -> nx.DiGraph:
-    """Build a DiGraph that includes *all* nodes declared/needed, not just those on edges."""
+    """Build a DiGraph from the example without inventing extra nodes.
+    Works with string or int node labels.
+    """
     ginfo = example["graph"]
     edges = [tuple(e) for e in ginfo["edges"]]
     X, Y, S = example["X"], example["Y"], list(example["S"])
 
-    # Infer node set robustly
-    edge_nodes = {u for (u, v) in edges for u in (u, v)}
+    # Collect nodes from edges and query fields
+    nodes = set()
+    for u, v in edges:
+        nodes.add(u); nodes.add(v)
+    nodes.add(X); nodes.add(Y); nodes.update(S)
+
+    # Optional: if *all* labels are ints and num_nodes is declared,
+    # you can choose to also include isolated indices 0..n-1.
     n_declared = ginfo.get("num_nodes")
-    if isinstance(n_declared, int):
-        nodes = set(range(n_declared))
-    else:
-        nodes = edge_nodes | {X, Y} | set(S)
+    if isinstance(n_declared, int) and all(isinstance(z, int) for z in nodes):
+        # Uncomment the next line if you WANT isolated int nodes shown:
+        # nodes |= set(range(n_declared))
+        pass
 
     G = nx.DiGraph()
-    G.add_nodes_from(sorted(nodes))
+    G.add_nodes_from(nodes)
     G.add_edges_from(edges)
     return G
 
@@ -106,6 +114,7 @@ def dag_layout(G: nx.DiGraph):
         return nx.shell_layout(G)
     except Exception:
         return nx.spring_layout(G, seed=0)
+    
 
 # ---------- Drawing ----------
 

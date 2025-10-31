@@ -68,13 +68,22 @@ def dag_checks(edges: List[Tuple[int,int]]):
     return True, ""
 
 def node_set_from_example(graph_dict, X, Y, S):
-    edge_nodes = {u for (u, v) in graph_dict["edges"] for u in (u, v)}
-    edge_nodes |= {X, Y} | set(S)
+    # Always collect explicit labels from edges + query
+    edge_nodes = set()
+    for (u, v) in graph_dict["edges"]:
+        edge_nodes.add(u); edge_nodes.add(v)
+    nodes = edge_nodes | {X, Y} | set(S)
+
+    # If ALL nodes are ints and num_nodes is present, we can (optionally) include
+    # isolated nodes [0..num_nodes-1]. But never mix ints with strings.
     n = graph_dict.get("num_nodes")
-    if isinstance(n, int) and (len(edge_nodes) == 0 or max(edge_nodes) < n):
-        return set(range(n))
+    if isinstance(n, int) and all(isinstance(z, int) for z in nodes):
+        # Optionally expand to the full range if you want to account for isolated nodes.
+        # It’s safe to just return `nodes` too; but if you prefer, uncomment next line:
+        # return set(range(max(n, (max(nodes) + 1 if nodes else 0))))
+        return nodes
     else:
-        return edge_nodes
+        return nodes
 
 def descendants(G: nx.DiGraph, X: int) -> Set[int]:
     if X not in G:
@@ -138,18 +147,18 @@ def analyze(path: str, strict: bool = True) -> int:
                 neg_reason_counts["forbidden_descendant"] += 1
             else:
                 H = proper_backdoor_graph(G, X)
-
-                # Ensure H contains all nodes (some implementations drop isolated nodes)
-                H.add_nodes_from(G.nodes())
-
                 UG = H.to_undirected()
                 UG.remove_nodes_from(S)
-
-                # Guard: if X or Y are missing (e.g., removed or were isolated and dropped), treat as no path
-                if (X not in UG) or (Y not in UG):
-                    still_conn = False
+                if X in UG and Y in UG:
+                    try:
+                        still_conn = nx.has_path(UG, X, Y)
+                    except nx.NetworkXError:
+                        # Defensive, but shouldn't happen since we checked membership
+                        still_conn = False
                 else:
-                    still_conn = nx.has_path(UG, X, Y)
+                    # If either endpoint isn’t in the graph after removals,
+                    # treat as no path (i.e., not d-connected in this crude proxy).
+                    still_conn = False
 
                 if still_conn:
                     neg_reason_counts["still_dconnected"] += 1

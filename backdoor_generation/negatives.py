@@ -4,7 +4,7 @@ import random
 
 from .samples import Sample
 from .adjustment import is_ba_valid, enumerate_valid_adjustment_sets
-from .graphs import descendants
+from .graphs import descendants, compute_complexity_meta, filter_meta
 from .samples import compute_metadata
 
 def make_negative_forbidden_desc(G: nx.DiGraph, X: int, Y: int, rng: random.Random,
@@ -22,7 +22,6 @@ def make_negative_forbidden_desc(G: nx.DiGraph, X: int, Y: int, rng: random.Rand
     meta = compute_metadata(G, X, Y, S, [])
     return Sample(list(G.edges()), X, Y, sorted(S), 0, meta)
 
-
 def make_negative_collider_trap(G: nx.DiGraph, X: int, Y: int, rng: random.Random) -> Optional[Sample]:
     """
     Try to include a collider or descendant of collider on an X-Y path to open it.
@@ -38,7 +37,6 @@ def make_negative_collider_trap(G: nx.DiGraph, X: int, Y: int, rng: random.Rando
                 meta['neg_type'] = 'collider'
                 return Sample(list(G.edges()), X, Y, sorted(S), 0, meta)
     return None
-
 
 def make_negative_near_miss(G: nx.DiGraph, X: int, Y: int, rng: random.Random,
                             max_enum_size: Optional[int] = 6) -> Optional[Sample]:
@@ -59,9 +57,6 @@ def make_negative_near_miss(G: nx.DiGraph, X: int, Y: int, rng: random.Random,
     meta = compute_metadata(G, X, Y, S, mins)
     meta['neg_type'] = 'near_miss'
     return Sample(list(G.edges()), X, Y, sorted(S), 0, meta)
-
-
-
 
 def make_negative_weighted(G, X, Y, rng, cfg) -> Optional[Sample]:
     # Prepare candidates by weight (filter out disabled types)
