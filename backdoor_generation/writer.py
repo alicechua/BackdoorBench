@@ -52,8 +52,9 @@ def write_balanced_jsonl(path: str, total: int, split: str, cfg):
 
     with open(path, "w") as f:
         while pos < pos_target or neg < neg_target:
-            nmax = cfg.n_max if split != "test" else max(cfg.n_max, cfg.n_min + 2)
-            n = rng.randint(cfg.n_min, nmax)
+            nmin = cfg.n_min if split != "test" else cfg.n_min + 3
+            nmax = cfg.n_max if split != "test" else cfg.n_max + 3
+            n = rng.randint(nmin, nmax)
             deg_rng = cfg.avg_deg_test if split == "test" else cfg.avg_deg_train
             G = random_dag(n, rng.uniform(*deg_rng), rng)
             X, Y = pick_query_pair(G, rng)
@@ -99,6 +100,7 @@ def write_balanced_jsonl(path: str, total: int, split: str, cfg):
                     "descendants_of_X": built.meta.get("descendants_of_X", []),
                     "node_name_style": cfg.node_name_style,
                 },
+                "premise": ". ".join([f"{u} causes {v}" for (u, v) in out_edges]) + ".",
                 "hypothesis": f"{sorted(out_S)} is a valid minimal backdoor adjustment set for {out_X} -> {out_Y}",
             }
 

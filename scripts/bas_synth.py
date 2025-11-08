@@ -19,9 +19,9 @@ def main():
     GenConfig, write_balanced_jsonl = _try_imports()
 
     p = argparse.ArgumentParser("BAS synthetic dataset generator")
-    p.add_argument("--train", type=int, default=2000)
-    p.add_argument("--val",   type=int, default=500)
-    p.add_argument("--test",  type=int, default=1000)
+    p.add_argument("--train", type=int, default=0)
+    p.add_argument("--val",   type=int, default=0)
+    p.add_argument("--test",  type=int, default=0)
     p.add_argument("--outdir", type=str, default="data/bas_synth")
     p.add_argument("--seed",   type=int, default=123)
     p.add_argument("--max-enum-size", type=int, default=6)
@@ -58,9 +58,12 @@ def main():
     )
 
     os.makedirs(args.outdir, exist_ok=True)
-    write_balanced_jsonl(os.path.join(args.outdir, "train.jsonl"), args.train, "train", cfg)
-    write_balanced_jsonl(os.path.join(args.outdir, "val.jsonl"),   args.val,   "val",   cfg)
-    write_balanced_jsonl(os.path.join(args.outdir, "test.jsonl"),  args.test,  "test",  cfg)
+    if args.train > 0:
+        write_balanced_jsonl(os.path.join(args.outdir, "train.jsonl"), args.train, "train", cfg)
+    if args.val > 0:
+        write_balanced_jsonl(os.path.join(args.outdir, "val.jsonl"),   args.val,   "val",   cfg)
+    if args.test > 0:
+        write_balanced_jsonl(os.path.join(args.outdir, "test.jsonl"),  args.test,  "test",  cfg)
     print(f"Wrote dataset to {args.outdir}/{{train,val,test}}.jsonl")
 
 if __name__ == "__main__":

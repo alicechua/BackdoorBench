@@ -27,7 +27,7 @@ def random_dag(n: int, avg_deg: float, rng: random.Random) -> nx.DiGraph:
 
     # number of possible forward edges
     m = n * (n - 1) / 2
-    p = min(max(avg_deg * n / (2 * m), 0.0), 1.0)  # crude calibration
+    p = min(max(avg_deg * n / m, 0.0), 1.0)  # crude calibration
 
     for i in range(n):
         for j in range(i + 1, n):
