@@ -21,7 +21,7 @@ class Sample:
 def pick_query_pair(G: nx.DiGraph, rng: random.Random) -> Tuple[int, int]:
     nodes = list(G.nodes())
     X = rng.choice(nodes)
-    Ys = [v for v in nodes if v != X and nx.has_path(G, X, v) or nx.has_path(G, v, X)]
+    Ys = [v for v in nodes if v != X and (nx.has_path(G, X, v) or nx.has_path(G, v, X))]
     if not Ys:
         # fallback: ensure at least distinct
         Y = rng.choice([v for v in nodes if v != X])

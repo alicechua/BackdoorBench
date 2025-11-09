@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json, os, random
 import networkx as nx
+from tqdm import tqdm
 
 from .names import make_node_names
 from .adjustment import is_minimal, is_ba_valid 
@@ -51,6 +52,8 @@ def write_balanced_jsonl(path: str, total: int, split: str, cfg):
     from .negatives import make_negative_weighted
 
     with open(path, "w") as f:
+        # Add a progress bar for pos + neg
+        pbar = tqdm(total=pos_target + neg_target, desc=f"Writing {split} set")
         while pos < pos_target or neg < neg_target:
             nmin = cfg.n_min if split != "test" else cfg.n_min + 3
             nmax = cfg.n_max if split != "test" else cfg.n_max + 3
@@ -58,6 +61,7 @@ def write_balanced_jsonl(path: str, total: int, split: str, cfg):
             deg_rng = cfg.avg_deg_test if split == "test" else cfg.avg_deg_train
             G = random_dag(n, rng.uniform(*deg_rng), rng)
             X, Y = pick_query_pair(G, rng)
+            assert X != Y
 
             need_pos = (pos_target - pos) >= (neg_target - neg)
             built = make_positive(G, X, Y, rng, cfg.max_enum_size, cfg) if need_pos \
@@ -108,6 +112,10 @@ def write_balanced_jsonl(path: str, total: int, split: str, cfg):
                 f.write(json.dumps(obj) + "\n"); pos += 1
             elif label == 0 and neg < neg_target:
                 f.write(json.dumps(obj) + "\n"); neg += 1
+
+            pbar.n = pos + neg
+            pbar.refresh()
+        pbar.close()
 
 # def _compute_label_and_meta(G: nx.DiGraph, X: int, Y: int, S: list[int]) -> tuple[int, bool, bool]:
 #     Sset = set(S)
