@@ -83,7 +83,9 @@ def write_balanced_jsonl(path: str, total: int, split: str, cfg):
             out_edges, out_X, out_Y, out_S, inverse_map, style = _relabel_for_output(
                 built.graph_edges, built.X, built.Y, built.S, cfg, rng
             )
-
+            
+            if split == "test":
+                random.shuffle(out_edges)
 
             # meta updates
             built.meta["split"] = split
