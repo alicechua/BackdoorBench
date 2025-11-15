@@ -20,6 +20,7 @@ def make_negative_forbidden_desc(G: nx.DiGraph, X: int, Y: int, rng: random.Rand
     if is_ba_valid(G, X, Y, S):
         return None  # failed to become negative; skip
     meta = compute_metadata(G, X, Y, S, [])
+    meta['neg_type'] = 'forbidden_descendant'
     return Sample(list(G.edges()), X, Y, sorted(S), 0, meta)
 
 def make_negative_collider_trap(G: nx.DiGraph, X: int, Y: int, rng: random.Random) -> Optional[Sample]:
