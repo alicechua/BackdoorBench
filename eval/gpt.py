@@ -30,6 +30,13 @@ def parse_args():
         default="./eval_results.jsonl",
         help="Path to save evaluation results.",
     )
+    parser.add_argument(
+        "-n",
+        "--num_samples",
+        type=int,
+        default=-1,
+        help="Number of samples to evaluate.",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -42,12 +49,14 @@ if __name__ == "__main__":
     client = OpenAI()
 
     outputs = []
-    for input in tqdm(inputs[:10]):
+    if args.num_samples > 0:
+        inputs = inputs[: args.num_samples]
+    for input in tqdm(inputs):
         prompt = f"Premise: {input['premise']}\nHypothesis: {input['hypothesis']}\nQuestion: Is the hypothesis true under the premise? Concisely explain and answer 'Yes' or 'No'. Put the final answer inside <answer></answer> tags."
         response = client.responses.create(
             model=args.model_path,
             input=prompt,
-            max_tokens=512,
+            max_output_tokens=512,
             temperature=0.0
         )
         output = input.copy()
