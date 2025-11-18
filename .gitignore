@@ -209,3 +209,5 @@ __marimo__/
 # Generated datasets & visualizations
 *.jsonl
 *.png
+
+*.slurm
