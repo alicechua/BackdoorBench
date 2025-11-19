@@ -1,5 +1,6 @@
 import argparse
 import json
+import random
 from openai import OpenAI
 import os
 import dotenv
@@ -37,6 +38,18 @@ def parse_args():
         default=-1,
         help="Number of samples to evaluate.",
     )
+    parser.add_argument(
+        "--few_shot",
+        type=int,
+        default=0,
+        help="Number of few-shot examples to provide.",
+    )
+    parser.add_argument(
+        "--few_shot_path",
+        type=str,
+        default="",
+        help="Path to few-shot examples JSONL file.",
+    )
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -51,8 +64,30 @@ if __name__ == "__main__":
     outputs = []
     if args.num_samples > 0:
         inputs = inputs[: args.num_samples]
+    if args.few_shot > 0 and args.few_shot_path:
+        with open(args.few_shot_path, 'r') as f:
+            few_shot_examples = [json.loads(line) for line in f]
     for input in tqdm(inputs):
-        prompt = f"Premise: {input['premise']}\nHypothesis: {input['hypothesis']}\nQuestion: Is the hypothesis true under the premise? Concisely explain and answer 'Yes' or 'No'. Put the final answer inside <answer></answer> tags."
+        prefix = ""
+        if args.few_shot > 0 and args.few_shot_path:
+            random_examples = random.sample(few_shot_examples, args.few_shot)
+            for example in random_examples:
+                if example["label"] == 1:
+                    answer = "Yes"
+                    explanation = "This is true because the set blocks all backdoor paths."
+                elif example["label"] == 0:
+                    answer = "No"
+                    if "neg_type" not in example["meta"]:
+                        explanation = "This is false because conditioning on a descendant violates the backdoor criterion."
+                    elif example["meta"]["neg_type"] == "collider":
+                        explanation = "This is false because conditioning on a collider opens a backdoor path."
+                    elif example["meta"]["neg_type"] == "near_miss":
+                        explanation = "This is false because the set does not fully block the backdoor path."
+                    else: # It is conditioning on a descendant
+                        explanation = "This is false because conditioning on a descendant violates the backdoor criterion."
+                prefix += f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}\nQuestion: Is the hypothesis true under the premise? Concisely explain and answer 'Yes' or 'No'. Put the final answer inside <answer></answer> tags.\nExplanation: {explanation} Final Answer: <answer>{answer}</answer>\n\n"
+        prompt = f"{prefix}\nPremise: {input['premise']}\nHypothesis: {input['hypothesis']}\nQuestion: Is the hypothesis true under the premise? Concisely explain and answer 'Yes' or 'No'. Put the final answer inside <answer></answer> tags."
+        # print(prompt)
         response = client.responses.create(
             model=args.model_path,
             input=prompt,
