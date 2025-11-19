@@ -443,7 +443,7 @@ def main():
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     # 3) Save the model (LoRA)
-    model.save_pretrained_merged("model_cft_lora_", tokenizer, save_method="lora")  # depending on version
+    model.save_pretrained_merged("model_cft_lora", tokenizer, save_method="lora")  # depending on version
 
 
 if __name__ == "__main__":

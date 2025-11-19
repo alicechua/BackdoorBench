@@ -211,3 +211,5 @@ __marimo__/
 *.png
 
 *.slurm
+*.json
+*.jsonl
