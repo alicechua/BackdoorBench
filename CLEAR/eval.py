@@ -1,9 +1,59 @@
 import sys
 import json
 import re
+import os
+import time
+from openai import OpenAI
+import dotenv
+from tqdm import tqdm
 
+dotenv.load_dotenv()
+client = OpenAI()
 
-input_filename, question_type, output_filename = sys.argv[1], sys.argv[2], sys.argv[3]
+def openai_api(input_text, model_name="gpt-4o-mini", retries=3):
+  retry_cnt = 0
+  backoff_time = 5
+  while retry_cnt < retries:
+    try:
+      response = client.chat.completions.create(
+          model=model_name, 
+          messages=[
+              {"role": "system", "content": "You are a helpful assistant."},
+              {"role": "user", "content": input_text}
+          ]
+      )
+      return response.choices[0].message.content
+    except:
+      time.sleep(backoff_time)
+      backoff_time *= 1.5
+      retry_cnt += 1
+  return None
+
+def extract_answer(response_text, question_type):
+    if question_type in ["YN", "EX"]:
+        prompt = f"Please extract the final answer from the following text. The answer should be either 'Yes' or 'No'. If the answer is not present or unclear, return 'Unknown'.\n\nText: {response_text}\n\nAnswer:"
+        res = openai_api(prompt)
+        if res:
+            if "yes" in res.lower(): return "Yes."
+            if "no" in res.lower(): return "No."
+        return "Unknown."
+    elif question_type == "MC":
+        prompt = f"Please extract the final answer from the following text. The answer should be one of the options: A, B, C, or D. Return only the letter.\n\nText: {response_text}\n\nAnswer:"
+        res = openai_api(prompt)
+        if res:
+            match = re.search(r'[ABCD]', res.upper())
+            if match: return match.group(0)
+        return "unknown"
+    elif question_type == "HM":
+        prompt = f"Please extract the final numerical answer from the following text. Return only the number.\n\nText: {response_text}\n\nAnswer:"
+        res = openai_api(prompt)
+        if res:
+            match = re.search(r'-?\d+', res)
+            if match: return int(match.group(0))
+        return -1
+    return None
+
+input_filename, question_type = sys.argv[1], sys.argv[2]
 lines = open(input_filename, encoding='utf-8').readlines()
 
 is_yn = (question_type == "YN" or question_type == "EX")
@@ -45,29 +95,14 @@ task_types = [
     "identification",
 ]
 
-for line in lines:
+for line in tqdm(lines):
     obj = json.loads(line)
     if question_type != obj["question_type"]: continue
     task_type = obj["task_type"]
     if is_yn:
-        pattern_0 = r'([\s\W]+no)|(^no)'
-        pattern_1 = r'([\s\W]+yes)|(^yes)'
-        pattern_2 = r'([\s\W]+unknown)|(^unknown)'
         assert obj["answer"] in ["Yes.", "No."], obj["answer"]
-        obj_0 = re.search(pattern_0, obj["format_response"], re.I)
-        obj_1 = re.search(pattern_1, obj["format_response"], re.I)
-        obj_2 = re.search(pattern_2, obj["format_response"], re.I)
-        if obj_0 is not None and obj_1 is None and obj_2 is None:
-            pred = "No."
-        elif obj_0 is None and obj_1 is not None and obj_2 is None:
-            pred = "Yes."
-        elif obj_0 is None and obj_1 is None and obj_2 is not None:
-            pred = "Unknown."
-        else:
-            print(obj_0, obj_1, obj_2, obj["format_response"])
-            pred = "Unknown"
-            # assert False
-        # print(obj["format_response"], pred)
+        pred = extract_answer(obj["model_response"], "YN")
+        
         if task_type not in result_dict:
             result_dict[task_type] = {
                 "tp": 0,
@@ -94,27 +129,8 @@ for line in lines:
                     result_dict[key]["wrong"] += 1
     elif is_mc:
         assert obj["answer"] in ["A", "B", "C", "D"]
-        pattern_0 = r'([\s\W]+A)|(^A)'
-        pattern_1 = r'([\s\W]+B)|(^B)'
-        pattern_2 = r'([\s\W]+C)|(^C)'
-        pattern_3 = r'([\s\W]+D)|(^D)'
-        obj_0 = re.search(pattern_0, obj["format_response"])
-        obj_1 = re.search(pattern_1, obj["format_response"])
-        obj_2 = re.search(pattern_2, obj["format_response"])
-        obj_3 = re.search(pattern_3, obj["format_response"])
-        # if obj["format_response"] not in ["A", "B", "C", "D", "unknown"]:
-        #     print(obj["format_response"])
-        if obj_0 is not None and obj_1 is None and obj_2 is None and obj_3 is None:
-            pred = "A"
-        elif obj_1 is not None and obj_0 is None and obj_2 is None and obj_3 is None:
-            pred = "B"
-        elif obj_2 is not None and obj_0 is None and obj_1 is None and obj_3 is None:
-            pred = "C"
-        elif obj_3 is not None and obj_0 is None and obj_1 is None and obj_2 is None:
-            pred = "D"
-        else:
-            # print(obj["format_response"])
-            pred = "unknown"
+        pred = extract_answer(obj["model_response"], "MC")
+        
         if task_type not in result_dict:
             result_dict[task_type] = {
                 "correct": 0,
@@ -127,10 +143,8 @@ for line in lines:
                 result_dict[key]["wrong"] += 1
     elif is_hm:
         gt = int(obj["answer"])
-        try:
-            dt = int(obj["format_response"])
-        except Exception as e:
-            dt = -1
+        dt = extract_answer(obj["model_response"], "HM")
+        
         if task_type not in result_dict:
             result_dict[task_type] = {
                 "correct": 0,
@@ -142,38 +156,47 @@ for line in lines:
             else:
                 result_dict[key]["wrong"] += 1        
 
-f_out = open(output_filename, 'w')
 for key in task_types + ['total']:
     if key not in result_dict:
         continue
-    result_dict[key]["accuracy"] = result_dict[key]["correct"] / (result_dict[key]["correct"] + result_dict[key]["wrong"]) * 100
+    # Accuracy
+    correct = result_dict[key]["correct"]
+    wrong = result_dict[key]["wrong"]
+    total = correct + wrong
+    acc = correct / total if total > 0 else 0
+    result_dict[key]["accuracy"] = acc * 100
+    result_dict[key]["acc_str"] = f"{correct}/{total}"
 
+    if is_yn:
+        # Precision
+        tp = result_dict[key].get("tp", 0)
+        fp = result_dict[key].get("fp", 0)
+        prec_denom = tp + fp
+        prec = tp / prec_denom if prec_denom > 0 else 0
+        result_dict[key]["precision"] = prec * 100
+        result_dict[key]["prec_str"] = f"{tp}/{prec_denom}"
 
-if is_yn:
-    f_out.write('''
-|task | TP | FN | FP | TN | Correct | Wrong | accuracy |
-|:------:|:------:|:------:|:------:|:------:|:------:|:------:|:------:|
-''')
-    for task_type in task_types + ["total"]:
-        f_out.write(f"|{task_type}|")
-        if task_type not in result_dict:
-            f_out.write("- | - | - | - | - | - | - |\n")
-            continue
-        for item in ["tp", "fn", "fp", "tn", "correct", "wrong"]:
-            f_out.write(f"{result_dict[task_type][item]} |")
-        f_out.write(f"{result_dict[task_type]['accuracy']:.2f} |")
-        f_out.write(f"\n")
-elif is_mc or is_hm:
-    f_out.write('''
-|task |  Correct | Wrong | accuracy |
-|:------:|:------:|:------:|:------:|
-''')
-    for task_type in task_types + ["total"]:
-        f_out.write(f"|{task_type}|")
-        if task_type not in result_dict:
-            f_out.write("- | - | - |\n")
-            continue
-        for item in [ "correct", "wrong"]:
-            f_out.write(f"{result_dict[task_type][item]} |")
-        f_out.write(f"{result_dict[task_type]['accuracy']:.2f} |")
-        f_out.write(f"\n")    
+        # Recall
+        fn = result_dict[key].get("fn", 0)
+        rec_denom = tp + fn
+        rec = tp / rec_denom if rec_denom > 0 else 0
+        result_dict[key]["recall"] = rec * 100
+        result_dict[key]["rec_str"] = f"{tp}/{rec_denom}"
+
+        # F1
+        if prec + rec > 0:
+            f1 = 2 * prec * rec / (prec + rec)
+        else:
+            f1 = 0
+        result_dict[key]["f1"] = f1 * 100
+
+for task_type in task_types + ["total"]:
+    if task_type not in result_dict:
+        continue
+    res = result_dict[task_type]
+    print(f"Task: {task_type}")
+    print(f"  Accuracy: {res['accuracy']:.2f}% ({res['acc_str']})")
+    if is_yn:
+        print(f"  Precision: {res['precision']:.2f}% ({res['prec_str']})")
+        print(f"  Recall: {res['recall']:.2f}% ({res['rec_str']})")
+        print(f"  F1: {res['f1']:.2f}")
