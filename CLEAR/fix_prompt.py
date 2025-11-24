@@ -226,6 +226,7 @@ Question:"""
 
 def add_3example(data):
 ####################################  YN  ####################################
+    prompt = ""
     if data["question_type"] == "YN":
         if data["task_type"] == "3_node_relation":
             prompt = """You will be provided with three and a related question that requires your answer.
