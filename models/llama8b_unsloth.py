@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Contextual Finetune Llama 3.1 8B with Unsloth on causal DAG dataset.
+Finetune Llama 3.1 8B with Unsloth on causal DAG dataset.
 
 Assumptions:
 - You already have the data files:
@@ -13,7 +13,9 @@ Assumptions:
 - Each example dict has keys: "graph", "premise", "hypothesis", "label".
 """
 
-import json, random, os, re
+import os
+import json
+import re
 from typing import Dict, List
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
@@ -23,12 +25,6 @@ from tqdm.auto import tqdm
 from trl import SFTTrainer
 from transformers import TrainingArguments
 
-from peft import PeftModel
-
-CKPT_DIR = "cft_4/output_cft_4/checkpoint-1250"
-
-RUN_ID = "cft_4"
-
 # ---------------------------------------------------------------------------
 # 1. Data loading & prompt formatting
 # ---------------------------------------------------------------------------
@@ -37,9 +33,6 @@ DATA_DIR = "./data"
 TRAIN_PATH = os.path.join(DATA_DIR, "train.jsonl")
 VAL_PATH   = os.path.join(DATA_DIR, "val.jsonl")
 TEST_PATH  = os.path.join(DATA_DIR, "test.jsonl")
-
-CONTEXT_PATH = "./contextual_prompts.json"  # change if needed
-rng = random.Random(0)
 
 # RESPONSE_TAG = "### Answer (0 or 1 only):\n"
 # SYSTEM = (
@@ -80,42 +73,6 @@ def load_json_mixed(path: str) -> List[Dict]:
             data = [json.loads(line) for line in f if line.strip()]
     return data
 
-def load_contextual_prompts(path: str):
-    prompts = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                prompts.append(json.loads(line))
-
-    general_prompts = [p for p in prompts if p.get("kind") == "general"]
-    negative_by_type = {}
-    for p in prompts:
-        if p.get("kind") == "negative":
-            nt = p.get("neg_type")
-            if nt:
-                negative_by_type.setdefault(nt, []).append(p)
-
-    return general_prompts, negative_by_type
-
-general_prompts, negative_prompts_by_type = load_contextual_prompts(CONTEXT_PATH)
-
-def pick_context_prompt(ex: Dict) -> str:
-    label = int(ex["label"])
-    meta  = ex.get("meta", {}) or {}
-    neg_type = meta.get("neg_type")
-
-    # Positive example → any general contextual prompt
-    if label == 1 or not neg_type:
-        return rng.choice(general_prompts)["text"]
-
-    # Negative example → use matching neg_type if available
-    candidates = negative_prompts_by_type.get(neg_type)
-    if candidates:
-        return rng.choice(candidates)["text"]
-
-    # Fallback if neg_type not found
-    return rng.choice(general_prompts)["text"]
 
 def build_prompt(ex: Dict, with_label: bool) -> str:
     """
@@ -141,31 +98,18 @@ def build_prompt(ex: Dict, with_label: bool) -> str:
     #     f"{RESPONSE_TAG}"
     # )
 
+    user_block = (
+        f"Premise: {premise}\n"
+        f"Hypothesis: {hypothesis}\n"
+        "Question: Is the hypothesis true under the premise? "
+        "Concisely explain and answer 'Yes' or 'No'. "
+        f"{RESPONSE_TAG}"
+    )
+
+    full_prompt = f"{SYSTEM}\n\n{user_block}"
     if with_label:
-        ctx_text = pick_context_prompt(ex)
-
-        user_block = (
-            f"Context: {ctx_text}\n"
-            f"Premise: {premise}\n"
-            f"Hypothesis: {hypothesis}\n"
-            "Question: Is the hypothesis true under the premise? "
-            "Concisely explain and answer 'Yes' or 'No'. "
-            f"{RESPONSE_TAG}"
-        )
-
-        full_prompt = f"{SYSTEM}\n\n{user_block}"
         # full_prompt += label_str
         full_prompt += gold_ans
-    else:
-        user_block = (
-            f"Premise: {premise}\n"
-            f"Hypothesis: {hypothesis}\n"
-            "Question: Is the hypothesis true under the premise? "
-            "Concisely explain and answer 'Yes' or 'No'. "
-            f"{RESPONSE_TAG}"
-        )
-        full_prompt = f"{SYSTEM}\n\n{user_block}"
-
     return full_prompt
 
 
@@ -198,27 +142,6 @@ def load_datasets():
 # 3. Model loading & finetuning
 # ---------------------------------------------------------------------------
 
-def load_from_checkpoint(max_seq_length: int = 2048):
-    print("Loading base model (Llama 3.1 8B 4-bit) ...")
-    base_model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name      = "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
-        max_seq_length  = max_seq_length,
-        load_in_4bit    = True,
-        dtype           = None,  # let Unsloth pick
-    )
-
-    print(f"Loading LoRA adapter from {CKPT_DIR} ...")
-    model = PeftModel.from_pretrained(
-        base_model,
-        CKPT_DIR,
-        is_trainable=False,  # we're doing inference, not training
-    )
-
-    # Optional but recommended with Unsloth for inference
-    FastLanguageModel.for_inference(model)
-
-    return model, tokenizer
-
 def create_model(max_seq_length: int = 2048):
     print("Loading base model (Llama 3.1 8B 4-bit) ...")
     model, tokenizer = FastLanguageModel.from_pretrained(
@@ -249,7 +172,7 @@ def finetune(model, tokenizer, train_ds, val_ds, max_seq_length: int = 2048):
     print("Starting finetuning ...")
 
     training_args = TrainingArguments(
-        output_dir=f"{RUN_ID}/output_{RUN_ID}",
+        output_dir="output_base",
         learning_rate=3e-4,
         lr_scheduler_type="linear",
         per_device_train_batch_size=4,
@@ -429,8 +352,7 @@ def evaluate(model, tokenizer, test_raw, max_examples: int | None = None):
 
     # ---- Dump to JSON file ----
     os.makedirs("results", exist_ok=True)
-    test_oupts = RUN_ID+"/test_outputs_"+RUN_ID+".json"
-    with open(test_oupts, "w", encoding="utf-8") as f:
+    with open("results/test_outputs.json", "w", encoding="utf-8") as f:
         json.dump(
             {
                 "metrics": metrics,
@@ -441,7 +363,7 @@ def evaluate(model, tokenizer, test_raw, max_examples: int | None = None):
             ensure_ascii=False,
         )
 
-    print(f"\nSaved detailed outputs to {test_oupts}")
+    print(f"\nSaved detailed outputs to results/test_outputs.json")
     return metrics, all_outputs
 
 # ---------------------------------------------------------------------------
@@ -449,14 +371,11 @@ def evaluate(model, tokenizer, test_raw, max_examples: int | None = None):
 # ---------------------------------------------------------------------------
 
 def main():
-    # --- Save everything ---
-    os.makedirs(RUN_ID, exist_ok=True)
-
     _, _, test_raw, train_ds, val_ds = load_datasets()
 
     max_seq_length = 2048
 
-    # model, tokenizer = create_model(max_seq_length=max_seq_length)
+    model, tokenizer = create_model(max_seq_length=max_seq_length)
     # model, tokenizer = finetune(
     #     model,
     #     tokenizer,
@@ -465,25 +384,26 @@ def main():
     #     max_seq_length=max_seq_length,
     # )
 
-    model, tokenizer = load_from_checkpoint(max_seq_length=max_seq_length)
-
     # Prepare model for inference
     FastLanguageModel.for_inference(model)
 
     # Evaluate on full test set (change max_examples if you want a quick check)
     metrics, test_results = evaluate(model, tokenizer, test_raw, max_examples=None)
 
+    # --- Save everything ---
+    os.makedirs("results", exist_ok=True)
+
     # 1) Save metrics as JSON
-    with open(f"{RUN_ID}/metrics_{RUN_ID}.json", "w", encoding="utf-8") as f:
+    with open("results/metrics_base.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
     # 2) Save per-example test results as JSONL (one example per line)
-    with open(f"{RUN_ID}/test_results_{RUN_ID}.jsonl", "w", encoding="utf-8") as f:
+    with open("results/test_results_base.jsonl", "w", encoding="utf-8") as f:
         for row in test_results:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     # 3) Save the model (LoRA)
-    model.save_pretrained_merged(f"{RUN_ID}/model_lora_{RUN_ID}", tokenizer, save_method="lora")  # depending on version
+    # model.save_pretrained_merged("model_lora", tokenizer, save_method="lora")  # depending on version
 
 
 if __name__ == "__main__":

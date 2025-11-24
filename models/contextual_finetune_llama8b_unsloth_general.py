@@ -23,11 +23,7 @@ from tqdm.auto import tqdm
 from trl import SFTTrainer
 from transformers import TrainingArguments
 
-from peft import PeftModel
-
-CKPT_DIR = "cft_4/output_cft_4/checkpoint-1250"
-
-RUN_ID = "cft_4"
+RUN_ID = "cft_g_3"
 
 # ---------------------------------------------------------------------------
 # 1. Data loading & prompt formatting
@@ -101,20 +97,6 @@ def load_contextual_prompts(path: str):
 general_prompts, negative_prompts_by_type = load_contextual_prompts(CONTEXT_PATH)
 
 def pick_context_prompt(ex: Dict) -> str:
-    label = int(ex["label"])
-    meta  = ex.get("meta", {}) or {}
-    neg_type = meta.get("neg_type")
-
-    # Positive example → any general contextual prompt
-    if label == 1 or not neg_type:
-        return rng.choice(general_prompts)["text"]
-
-    # Negative example → use matching neg_type if available
-    candidates = negative_prompts_by_type.get(neg_type)
-    if candidates:
-        return rng.choice(candidates)["text"]
-
-    # Fallback if neg_type not found
     return rng.choice(general_prompts)["text"]
 
 def build_prompt(ex: Dict, with_label: bool) -> str:
@@ -141,10 +123,8 @@ def build_prompt(ex: Dict, with_label: bool) -> str:
     #     f"{RESPONSE_TAG}"
     # )
 
-    if with_label:
-        ctx_text = pick_context_prompt(ex)
-
-        user_block = (
+    ctx_text = pick_context_prompt(ex)
+    user_block = (
             f"Context: {ctx_text}\n"
             f"Premise: {premise}\n"
             f"Hypothesis: {hypothesis}\n"
@@ -152,20 +132,11 @@ def build_prompt(ex: Dict, with_label: bool) -> str:
             "Concisely explain and answer 'Yes' or 'No'. "
             f"{RESPONSE_TAG}"
         )
+    full_prompt = f"{SYSTEM}\n\n{user_block}"
 
-        full_prompt = f"{SYSTEM}\n\n{user_block}"
-        # full_prompt += label_str
+    if with_label:
         full_prompt += gold_ans
-    else:
-        user_block = (
-            f"Premise: {premise}\n"
-            f"Hypothesis: {hypothesis}\n"
-            "Question: Is the hypothesis true under the premise? "
-            "Concisely explain and answer 'Yes' or 'No'. "
-            f"{RESPONSE_TAG}"
-        )
-        full_prompt = f"{SYSTEM}\n\n{user_block}"
-
+        
     return full_prompt
 
 
@@ -197,27 +168,6 @@ def load_datasets():
 # ---------------------------------------------------------------------------
 # 3. Model loading & finetuning
 # ---------------------------------------------------------------------------
-
-def load_from_checkpoint(max_seq_length: int = 2048):
-    print("Loading base model (Llama 3.1 8B 4-bit) ...")
-    base_model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name      = "unsloth/Meta-Llama-3.1-8B-bnb-4bit",
-        max_seq_length  = max_seq_length,
-        load_in_4bit    = True,
-        dtype           = None,  # let Unsloth pick
-    )
-
-    print(f"Loading LoRA adapter from {CKPT_DIR} ...")
-    model = PeftModel.from_pretrained(
-        base_model,
-        CKPT_DIR,
-        is_trainable=False,  # we're doing inference, not training
-    )
-
-    # Optional but recommended with Unsloth for inference
-    FastLanguageModel.for_inference(model)
-
-    return model, tokenizer
 
 def create_model(max_seq_length: int = 2048):
     print("Loading base model (Llama 3.1 8B 4-bit) ...")
@@ -456,23 +406,21 @@ def main():
 
     max_seq_length = 2048
 
-    # model, tokenizer = create_model(max_seq_length=max_seq_length)
-    # model, tokenizer = finetune(
-    #     model,
-    #     tokenizer,
-    #     train_ds=train_ds,
-    #     val_ds=val_ds,
-    #     max_seq_length=max_seq_length,
-    # )
-
-    model, tokenizer = load_from_checkpoint(max_seq_length=max_seq_length)
+    model, tokenizer = create_model(max_seq_length=max_seq_length)
+    model, tokenizer = finetune(
+        model,
+        tokenizer,
+        train_ds=train_ds,
+        val_ds=val_ds,
+        max_seq_length=max_seq_length,
+    )
 
     # Prepare model for inference
     FastLanguageModel.for_inference(model)
 
     # Evaluate on full test set (change max_examples if you want a quick check)
     metrics, test_results = evaluate(model, tokenizer, test_raw, max_examples=None)
-
+    
     # 1) Save metrics as JSON
     with open(f"{RUN_ID}/metrics_{RUN_ID}.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
