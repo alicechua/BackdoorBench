@@ -17,9 +17,11 @@ import os
 import json
 import re
 from typing import Dict, List
+import random
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from unsloth.chat_templates import get_chat_template
+from unsloth import train_on_responses_only
 
 import torch
 from datasets import Dataset
@@ -27,7 +29,7 @@ from tqdm.auto import tqdm
 from trl import SFTTrainer
 from transformers import TrainingArguments
 
-RUN_ID = "instruct_finetune"
+RUN_ID = "instruct_cft"
 
 # ---------------------------------------------------------------------------
 # 1. Data loading & prompt formatting
@@ -37,6 +39,9 @@ DATA_DIR = "./data"
 TRAIN_PATH = os.path.join(DATA_DIR, "train.jsonl")
 VAL_PATH   = os.path.join(DATA_DIR, "val.jsonl")
 TEST_PATH  = os.path.join(DATA_DIR, "test.jsonl")
+
+CONTEXT_PATH = "./contextual_prompts.json"  # change if needed
+rng = random.Random(0)
 
 SYSTEM = (
     "You are a precise reasoning assistant. "
@@ -69,9 +74,50 @@ def load_json_mixed(path: str) -> List[Dict]:
             data = [json.loads(line) for line in f if line.strip()]
     return data
 
+
+def load_contextual_prompts(path: str):
+    prompts = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                prompts.append(json.loads(line))
+
+    general_prompts = [p for p in prompts if p.get("kind") == "general"]
+    negative_by_type = {}
+    for p in prompts:
+        if p.get("kind") == "negative":
+            nt = p.get("neg_type")
+            if nt:
+                negative_by_type.setdefault(nt, []).append(p)
+
+    return general_prompts, negative_by_type
+
+general_prompts, negative_prompts_by_type = load_contextual_prompts(CONTEXT_PATH)
+
+def pick_context_prompt(ex: Dict) -> str:
+    label = int(ex["label"])
+    meta  = ex.get("meta", {}) or {}
+    neg_type = meta.get("neg_type")
+
+    # Positive example → any general contextual prompt
+    if label == 1 or not neg_type:
+        return rng.choice(general_prompts)["text"]
+
+    # Negative example → use matching neg_type if available
+    candidates = negative_prompts_by_type.get(neg_type)
+    if candidates:
+        append_context = rng.choice(general_prompts)["text"] + "\n" +rng.choice(candidates)["text"]
+        return append_context
+
+    # Fallback if neg_type not found
+    return rng.choice(general_prompts)["text"]
+
 def to_messages(ex):
+    ctx_text = pick_context_prompt(ex)
     # Build the user prompt (no answer)
     user_text = (
+        f"Context: {ctx_text}\n"
         f"Premise: {ex.get('premise','').strip()}\n"
         f"Hypothesis: {ex.get('hypothesis','').strip()}\n"
         "Question: Is the hypothesis true under the premise? "
@@ -186,9 +232,14 @@ def finetune(model, tokenizer, train_ds, val_ds, max_seq_length: int = 2048):
         dataset_text_field="text",
         max_seq_length=max_seq_length,
         dataset_num_proc=2,
-        packing=True,
-        train_on_inputs=False,  # <<< mask the inputs
+        packing=False,
         args=training_args,
+    )
+
+    trainer = train_on_responses_only(
+        trainer,
+        instruction_part = "<|start_header_id|>user<|end_header_id|>\n\n",
+        response_part = "<|start_header_id|>assistant<|end_header_id|>\n\n",
     )
 
     trainer.train()
