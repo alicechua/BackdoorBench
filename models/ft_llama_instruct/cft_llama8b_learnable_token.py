@@ -37,7 +37,7 @@ N_SOFT_TOKENS = 10
 # 1. Data loading & prompt formatting
 # ---------------------------------------------------------------------------
 
-DATA_DIR = "./data/bas_short"
+DATA_DIR = "./data"
 TRAIN_PATH = os.path.join(DATA_DIR, "train.jsonl")
 VAL_PATH   = os.path.join(DATA_DIR, "val.jsonl")
 TEST_PATH  = os.path.join(DATA_DIR, "test.jsonl")
@@ -406,7 +406,11 @@ def predict(model, tokenizer, ex):
         tokenize=False,
         add_generation_prompt=True,
     )
-    input_ids = tokenizer.encode(prompt_text, return_tensors="pt").to(model.soft_prompt.device)
+    input_ids = tokenizer.encode(prompt_text, return_tensors="pt")
+    
+    # Get model device
+    model_device = next(model.base_model.parameters()).device
+    input_ids = input_ids.to(model_device)
     
     with torch.no_grad():
         embed_layer = model.get_input_embeddings()
@@ -422,17 +426,33 @@ def predict(model, tokenizer, ex):
             
             input_embeds = torch.cat([
                 before_embeds.unsqueeze(0),
-                model.soft_prompt.unsqueeze(0),
+                model.soft_prompt.to(input_embeds.device).unsqueeze(0),
                 after_embeds.unsqueeze(0)
             ], dim=1)
         
-        out = model.base_model.generate(
-            inputs_embeds=input_embeds,
-            max_new_tokens=128,
-            do_sample=False,
-        )
+        # Simple autoregressive generation with forward pass
+        generated_ids = []
+        current_embeds = input_embeds
+        
+        for _ in range(128):  # max_new_tokens
+            outputs = model.base_model(inputs_embeds=current_embeds)
+            next_token_logits = outputs.logits[:, -1, :]
+            next_token_id = torch.argmax(next_token_logits, dim=-1)
+            
+            # Stop if EOS token
+            if next_token_id.item() == tokenizer.eos_token_id:
+                break
+                
+            generated_ids.append(next_token_id.item())
+            
+            # Get embedding for next token and append
+            next_token_embed = model.get_input_embeddings()(next_token_id.unsqueeze(0))
+            current_embeds = torch.cat([current_embeds, next_token_embed], dim=1)
+        
+        # Combine input_ids with generated_ids for decoding
+        out = torch.cat([input_ids[0], torch.tensor(generated_ids, device=input_ids.device)])
     
-    return tokenizer.decode(out[0], skip_special_tokens=True)
+    return tokenizer.decode(out, skip_special_tokens=True)
 
 def predict_label(model, tokenizer, ex: Dict, max_new_tokens: int = 512):
     """
@@ -591,14 +611,7 @@ def main():
 
     model.eval()
 
-    metrics, test_results = evaluate(model, tokenizer, test_raw, max_examples=None)
-
-    with open(f"{RUN_ID}/metrics_{RUN_ID}.json", "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=2)
-
-    with open(f"{RUN_ID}/test_results_{RUN_ID}.jsonl", "w", encoding="utf-8") as f:
-        for row in test_results:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    # Save first
 
     # Save only LoRA adapters
     model.base_model.save_pretrained(f"{RUN_ID}/lora_adapters")
@@ -613,6 +626,16 @@ def main():
     
     print(f"\nSaved LoRA adapters to {RUN_ID}/lora_adapters/")
     print(f"Saved soft prompt to {RUN_ID}/soft_prompt.pt")
+
+    # --- Evaluate on test set ---
+    metrics, test_results = evaluate(model, tokenizer, test_raw, max_examples=None)
+
+    with open(f"{RUN_ID}/metrics_{RUN_ID}.json", "w", encoding="utf-8") as f:
+        json.dump(metrics, f, indent=2)
+
+    with open(f"{RUN_ID}/test_results_{RUN_ID}.jsonl", "w", encoding="utf-8") as f:
+        for row in test_results:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
