@@ -31,7 +31,7 @@ def openai_api(input_text, model_name="gpt-4o-mini", retries=3):
 
 def extract_answer(response_text, question_type):
     if question_type in ["YN", "EX"]:
-        prompt = f"Please extract the final answer from the following text. The answer should be either 'Yes' or 'No'. If the answer is not present or unclear, return 'Unknown'.\n\nText: {response_text}\n\nAnswer:"
+        prompt = f"Please extract the final answer from the following text. The answer should be either 'Yes' or 'No'. \n\nText: {response_text}\n\nAnswer:"
         res = openai_api(prompt)
         if res:
             if "yes" in res.lower(): return "Yes."
