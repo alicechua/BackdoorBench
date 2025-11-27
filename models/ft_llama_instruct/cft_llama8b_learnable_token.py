@@ -315,6 +315,7 @@ def create_model(max_seq_length: int = 2048):
         ],
         use_rslora=True,
         use_gradient_checkpointing="unsloth",
+        modules_to_save=[],  # Explicitly prevent saving embed_tokens and lm_head
     )
     
     print("Checking LoRA setup...")
@@ -357,7 +358,7 @@ def finetune(model, tokenizer, train_ds, val_ds, max_seq_length: int = 2048):
         weight_decay=0.01,
         logging_steps=1,
         eval_strategy="epoch",
-        save_strategy="epoch",
+        save_strategy="no",
         fp16=True,
         bf16=False,
         optim="adamw_torch",
