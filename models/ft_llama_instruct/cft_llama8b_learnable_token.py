@@ -18,6 +18,7 @@ import json
 import re
 from typing import Dict, List
 import random
+import argparse
 
 from unsloth import FastLanguageModel, is_bfloat16_supported
 from unsloth.chat_templates import get_chat_template
@@ -460,6 +461,7 @@ def predict_label(model, tokenizer, ex: Dict, max_new_tokens: int = 512):
     Run the finetuned model on a single example and try to extract a 0/1 label.
     """
     text = predict(model, tokenizer, ex)
+    text = text.split('assistant\n\n')[-1]  # Get text after 'assistant' role
 
     # Find the first "yes" or "no" (case-insensitive, word boundary)
     m = re.search(r"\b(yes|no)\b", text, flags=re.IGNORECASE)
@@ -593,7 +595,7 @@ def evaluate(model, tokenizer, test_raw, max_examples: int | None = None):
 # 5. Main
 # ---------------------------------------------------------------------------
 
-def main():
+def main(inference_only: bool = False):
     # --- Save everything ---
     os.makedirs(RUN_ID, exist_ok=True)
     max_seq_length = 2048
@@ -602,31 +604,40 @@ def main():
 
     _, _, test_raw, train_ds, val_ds = load_datasets(tokenizer)
     
-    model, tokenizer = finetune(
-        model,
-        tokenizer,
-        train_ds=train_ds,
-        val_ds=val_ds,
-        max_seq_length=max_seq_length,
-    )
+    if inference_only:
+        print(f"Loading LoRA adapters from {RUN_ID}/lora_adapters ...")
+        model.base_model.load_adapter(f"{RUN_ID}/lora_adapters", adapter_name="trained_adapter")
+        model.base_model.set_adapter("trained_adapter")
+        
+        print(f"Loading soft prompt from {RUN_ID}/soft_prompt.pt ...")
+        sp_data = torch.load(f"{RUN_ID}/soft_prompt.pt", map_location=model.device)
+        model.soft_prompt.data = sp_data['soft_prompt'].to(model.device)
+    else: 
+        model, tokenizer = finetune(
+            model,
+            tokenizer,
+            train_ds=train_ds,
+            val_ds=val_ds,
+            max_seq_length=max_seq_length,
+        )
 
-    model.eval()
+        model.eval()
 
-    # Save first
+        # Save first
 
-    # Save only LoRA adapters
-    model.base_model.save_pretrained(f"{RUN_ID}/lora_adapters")
-    tokenizer.save_pretrained(f"{RUN_ID}/lora_adapters")
-    
-    # Save soft prompt separately
-    torch.save({
-        'soft_prompt': model.soft_prompt.data,
-        'n_tokens': model.n_tokens,
-        'infix_marker': model.infix_marker,
-    }, f"{RUN_ID}/soft_prompt.pt")
-    
-    print(f"\nSaved LoRA adapters to {RUN_ID}/lora_adapters/")
-    print(f"Saved soft prompt to {RUN_ID}/soft_prompt.pt")
+        # Save only LoRA adapters
+        model.base_model.save_pretrained(f"{RUN_ID}/lora_adapters")
+        tokenizer.save_pretrained(f"{RUN_ID}/lora_adapters")
+        
+        # Save soft prompt separately
+        torch.save({
+            'soft_prompt': model.soft_prompt.data,
+            'n_tokens': model.n_tokens,
+            'infix_marker': model.infix_marker,
+        }, f"{RUN_ID}/soft_prompt.pt")
+        
+        print(f"\nSaved LoRA adapters to {RUN_ID}/lora_adapters/")
+        print(f"Saved soft prompt to {RUN_ID}/soft_prompt.pt")
 
     # --- Evaluate on test set ---
     metrics, test_results = evaluate(model, tokenizer, test_raw, max_examples=None)
@@ -640,4 +651,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--inference_only', action='store_true', help='Run only evaluation using saved LoRA and soft prompt')
+    args = parser.parse_args()
+    main(inference_only=args.inference_only)
