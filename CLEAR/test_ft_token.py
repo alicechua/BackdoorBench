@@ -56,6 +56,11 @@ def load_from_checkpoint(max_seq_length: int = 2048, checkpoint_dir: str = args.
     
     tokenizer = get_chat_template(tokenizer, chat_template="llama-3.1")
     
+    # Add INFIX_MARKER if needed
+    if INFIX_MARKER not in tokenizer.get_vocab():
+        tokenizer.add_tokens([INFIX_MARKER])
+        base_model.resize_token_embeddings(len(tokenizer))
+    
     lora_adapter_dir = os.path.join(checkpoint_dir, "lora_adapters")
     print(f"Loading LoRA adapter from {lora_adapter_dir} ...")
     model = PeftModel.from_pretrained(
@@ -63,14 +68,6 @@ def load_from_checkpoint(max_seq_length: int = 2048, checkpoint_dir: str = args.
         lora_adapter_dir,
         is_trainable = False,   # inference only
     )
-
-    # Optimize for inference (e.g. sets requires_grad=False, maybe hooks, etc.)
-    model = FastLanguageModel.for_inference(model)
-    
-    # Add INFIX_MARKER if needed
-    if INFIX_MARKER not in tokenizer.get_vocab():
-        tokenizer.add_tokens([INFIX_MARKER])
-        model.resize_token_embeddings(len(tokenizer))
         
     # Wrap with SoftPromptWrapper
     print("Wrapping with SoftPromptWrapper...")
