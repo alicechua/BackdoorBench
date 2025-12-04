@@ -52,6 +52,10 @@ python scripts/visualize_bas.py data/bas_smoke/test.jsonl --n 6 --outdir viz/tes
 │
 ├─ data/                          # (created) output datasets
 └─ viz/                           # (created) rendered figures
+└─ CLEAR/                         # files used to evaluate on CLEAR dataset
+└─ finetune_llama/                # filed used to finetune llama on BackdoorBench
+└─ gpt_baseline/                  # filed used to evaluate GPT-4o-mini on BackdoorBench
+└─ transformer/                   # filed used to train BERT transformer on BackdoorBench
 ```
 
 ---
