@@ -3,7 +3,7 @@ from pathlib import Path
 from collections import Counter
 import re
 
-IN_PATH = Path("CLEAR_results/CLEAR_results/BAS_llama_cft.jsonl")   # change if needed
+IN_PATH = Path("CLEAR_results/CLEAR_results/Backdoor_path_llama_instruct.jsonl")   # change if needed
 
 MARKER = "### Answer:\n"
 
